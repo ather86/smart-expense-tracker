@@ -1,65 +1,70 @@
 import streamlit as st
-from datetime import datetime
 from utils import save_expense_to_sheet, save_income_to_sheet
+from datetime import datetime
+import ollama
+import requests
 
-def add_entry_prompt():
-    st.title("📝 Add Expense / Income Entry")
-
-    entry_type = st.radio("Select Entry Type", ["Expense", "Income"])
-
-    date = st.date_input("Date", value=datetime.today())
-    amount = st.number_input("Amount (₹)", min_value=0.0, step=10.0)
-
-
-import ollama  # Requires Ollama to be running locally
-
-def predict_category_with_ollama(description):
+# Health check for Ollama
+def is_ollama_running():
     try:
-        system_prompt = """
-You are a helpful assistant that classifies expense descriptions into one of the following categories:
-["Food", "Transportation", "Utilities", "Health/medical", "Home", "EMI", "Personal", "Gifts", "Pets", "Outside food/party etc.", "Credit card bill", "Parents money", "Raysn's education etc.", "Kauser for monthly exp", "Kauser Business", "Farmhouse", "Other"]
+        r = requests.get("http://localhost:11434/")
+        return r.status_code == 200
+    except Exception:
+        return False
 
-Return only the category name that best matches the description.
-"""
-        full_prompt = f"{system_prompt}\n\nDescription: {description}\nCategory:"
-        response = ollama.chat(model="llama3", messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": full_prompt}
-        ])
-        category = response['message']['content'].strip()
-        return category
+def get_category_suggestion(description):
+    if not is_ollama_running() or not description.strip():
+        return ""
+    try:
+        response = ollama.chat(
+            model="llama3",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expense tracker assistant. Given a transaction description, "
+                        "return the most likely category like Food, Transport, Health, EMI, etc. Only return the category name."
+                    ),
+                },
+                {"role": "user", "content": f"Suggest category for: {description}"},
+            ]
+        )
+        return response["message"]["content"].strip()
     except Exception as e:
-        print("❌ Ollama prediction error:", e)
+        print("❌ Ollama error:", e)
         return ""
 
+def add_entry_prompt():
+    st.title("➕ Add Income or Expense Entry")
+    entry_type = st.radio("Select Entry Type", ["Expense", "Income"], horizontal=True)
+    date = st.date_input("Date", value=datetime.today())
+    amount = st.number_input("Amount (₹)", min_value=0.0, step=0.01)
+    description = st.text_input("Description", key="desc_input", help="Type what the transaction was for.")
 
+    # Autofill suggestion logic:
+    suggested_category = ""
+    if description:
+        if "last_description" not in st.session_state or st.session_state["last_description"] != description:
+            st.session_state["last_description"] = description
+            suggested_category = get_category_suggestion(description)
+            st.session_state["suggested_category"] = suggested_category
+        else:
+            suggested_category = st.session_state.get("suggested_category", "")
+    else:
+        suggested_category = ""
 
-    if entry_type == "Expense":
-        description = st.text_area("Description (Optional)", key="expense_desc")
-        suggested_category = predict_category_with_ollama(description) if description else ""
-        category = st.text_input("Expense Category (Auto-suggested below)", value=suggested_category, key="expense_cat")
-        if st.button("➕ Add Expense"):
-            if amount > 0 and category.strip():
-                save_expense_to_sheet(date, amount, description, category)
-                st.success("✅ Expense added successfully!")
-            else:
-                st.error("Please enter a valid amount and category.")
+    # Show autofilled category (user can override)
+    category = st.text_input("Category", value=suggested_category, key="cat_input", help="Edit or accept the suggestion.")
 
-        category = st.text_input("Expense Category (e.g. Food, Rent, EMI)", key="expense_cat")
-        description = st.text_area("Description (Optional)", key="expense_desc")
-        if st.button("➕ Add Expense"):
-            if amount > 0 and category.strip():
-                save_expense_to_sheet(date, amount, description, category)
-                st.success("✅ Expense added successfully!")
-            else:
-                st.error("Please enter a valid amount and category.")
-    else:  # Income
-        source = st.text_input("Income Source (e.g. Salary, Bonus)", key="income_src")
-        description = st.text_area("Description (Optional)", key="income_desc")
-        if st.button("➕ Add Income"):
-            if amount > 0 and source.strip():
-                # Match this with your utils.py function definition
-                save_income_to_sheet(date, amount, source, description)
-                st.success("✅ Income added successfully!")
-            else:
-                st.error("Please enter a valid amount and source.")
+    # Optional: show a tip if suggestion came from AI
+    if suggested_category and suggested_category == category:
+        st.caption("🤖 Category suggested by AI. You can edit it.")
+
+    if st.button("Save Expense" if entry_type == "Expense" else "Save Income"):
+        if entry_type == "Expense":
+            save_expense_to_sheet(date, amount, description, category)
+            st.success(f"✅ Expense entry saved: {description} ({category})")
+        else:
+            # For income, let's use "category" as source for now
+            save_income_to_sheet(date, amount, category, description)
+            st.success(f"✅ Income entry saved: {description} ({category})")
