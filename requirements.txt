@@ -8,3 +8,4 @@ matplotlib
 gspread-dataframe
 gspread-formatting
 gspread-pandas
+ollama
