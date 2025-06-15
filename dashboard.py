@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-from utils import load_expense_data, load_income_data
-
+from utils import load_expense_data, load_income_data, load_budgets
 
 def show_dashboard():
     st.title("📊 Smart Expense & Income Tracker - Dashboard")
@@ -43,7 +42,9 @@ def show_dashboard():
     inc_month_df = income_df[income_df["Month"] == selected_month] if "Month" in income_df.columns else pd.DataFrame()
 
     # Tabs for functionality
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Summary", "📂 Category Breakdown", "🧾 All Records", "📊 Monthly Trend"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📈 Summary", "📂 Category Breakdown", "🧾 All Records", "📊 Monthly Trend"
+    ])
 
     with tab1:
         st.subheader("💡 Monthly Summary")
@@ -57,9 +58,15 @@ def show_dashboard():
         col3.metric("📈 Net Savings", f"₹ {net_savings:,.0f}", delta_color="inverse")
 
     with tab2:
-        st.subheader("📂 Expense by Category (Pie Chart)")
-        cat_data = exp_month_df.groupby("Category")["Amount"].sum().sort_values(ascending=False)
+        st.subheader("📂 Expense by Category (Pie Chart & Budget Highlight)")
 
+        cat_data = exp_month_df.groupby("Category")["Amount"].sum().sort_values(ascending=False)
+        budgets_df = load_budgets(selected_month)
+        budget_dict = {}
+        if not budgets_df.empty:
+            budget_dict = dict(zip(budgets_df["Category"], budgets_df["BudgetAmount"]))
+
+        # Pie chart (as before)
         if not cat_data.empty:
             fig1, ax1 = plt.subplots()
             wedges, texts, autotexts = ax1.pie(
@@ -72,6 +79,38 @@ def show_dashboard():
             st.pyplot(fig1)
         else:
             st.info("No data for pie chart.")
+
+        # Budget Table with Highlighting
+        st.markdown("### 💡 Budget vs Actual by Category")
+        report_rows = []
+        for cat, spent in cat_data.items():
+            budget = float(budget_dict.get(cat, 0))
+            overspent = spent > budget and budget > 0
+            report_rows.append({
+                "Category": cat,
+                "Spent": spent,
+                "Budget": budget,
+                "Status": "🚨 Over Budget" if overspent else ("✅ Within Budget" if budget else "No Budget"),
+                "Delta": spent - budget
+            })
+
+        report_df = pd.DataFrame(report_rows)
+
+        def highlight_overspent(row):
+            if row["Status"] == "🚨 Over Budget":
+                return ["background-color: #ffe5e5; color: red"] * len(row)
+            elif row["Status"] == "✅ Within Budget":
+                return ["background-color: #e8ffe8"] * len(row)
+            else:
+                return ["" for _ in row]
+
+        if not report_df.empty:
+            st.dataframe(
+                report_df.style.apply(highlight_overspent, axis=1),
+                use_container_width=True
+            )
+        else:
+            st.info("No expense data for this month.")
 
     with tab3:
         st.subheader("📋 Expense Records")
