@@ -1,0 +1,10 @@
+streamlit
+pandas
+plotly
+openpyxl
+gspread
+oauth2client
+matplotlib
+gspread-dataframe
+gspread-formatting
+gspread-pandas
